@@ -11,12 +11,12 @@ from PIL import Image
 ICS_HEADERS = [
     "個人コード", "区分コード", "氏名（姓）", "氏名（名）", "氏名フリガナ（姓）", "氏名フリガナ（名）",
     "性別", "入社年月日", "退職年月日", "郵便番号", "住所1", "住所2",
-    "1月支給額", "2月支給額", "3月支給額", "4月支給額", "5月支給額", "6月支給額",
-    "7月支給額", "8月支給額", "9月支給額", "10月支給額", "11月支給額", "12月支給額",
-    "1月社会保険料", "2月社会保険料", "3月社会保険料", "4月社会保険料", "5月社会保険料", "6月社会保険料",
-    "7月社会保険料", "8月社会保険料", "9月社会保険料", "10月社会保険料", "11月社会保険料", "12月社会保険料",
-    "1月所得税額", "2月所得税額", "3月所得税額", "4月所得税額", "5月所得税額", "6月所得税額",
-    "7月所得税額", "8月所得税額", "9月所得税額", "10月所得税額", "11月所得税額", "12月所得税額",
+    "1月支給", "2月支給", "3月支給", "4月支給", "5月支給", "6月支給",
+    "7月支給", "8月支給", "9月支給", "10月支給", "11月支給", "12月支給",
+    "1月社保", "2月社保", "3月社保", "4月社保", "5月社保", "6月社保",
+    "7月社保", "8月社保", "9月社保", "10月社保", "11月社保", "12月社保",
+    "1月税額", "2月税額", "3月税額", "4月税額", "5月税額", "6月税額",
+    "7月税額", "8月税額", "9月税額", "10月税額", "11月税額", "12月税額",
     "1月賞与", "2月賞与", "3月賞与", "4月賞与", "5月賞与", "6月賞与",
     "7月賞与", "8月賞与", "9月賞与", "10月賞与", "11月賞与", "12月賞与"
 ]
@@ -44,8 +44,7 @@ uploaded_file = st.file_uploader("ファイルをドラッグ＆ドロップし�
 
 def process_with_ai(content, mime_type, is_image=False):
     """AIにデータを投げてJSON化する"""
-   # 修正後
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel('gemini-1.5-pro') # 画像認識も可能なモデル
     
     prompt_text = """
     あなたは給与計算のプロフェッショナルです。
@@ -58,52 +57,37 @@ def process_with_ai(content, mime_type, is_image=False):
     4. 日付は YYYY/MM/DD 形式に統一する。
     5. 出力は純粋なJSONテキストのみ（Markdownタグ不要）。
 
-    【出力ルール】
+    【抽出項目キー】
+    personal_code, section_code, last_name, first_name, last_name_kana, first_name_kana,
+    gender (1=男, 2=女), hire_date, retire_date, zip_code, address1, address2,
+    salary_1~12 (各月の支給), social_insurance_1~12 (各月の社保), tax_1~12 (各月の税), bonus_1~12 (各月の賞与)
 
+    添付されたファイルから給与データを抽出し、ICS年末調整システムの入力形式に合わせて出力してください。一個入力がずれると全てずれてしまうことを加味し、正確に情報を読み取り、正確にファイルを作成しなさい。
+
+
+
+    【出力ルール】
     1. 形式はcsvとし、ヘッダー(項目名)を必ず含めること。
     2. 列の並び：一行目に給与,12,月分,FMT,1,DBVER,二行目にテンプレ,タイプ,SL=4、3行目に個人コード,区分コード,氏名（姓）,氏名（名）,氏名フリガナ（姓）,氏名フリガナ（名）,性別,入社年月日,退職年月日,郵便番号,住所1,住所2,各月の支給額(N月分支給額).各月の社会保険料(N月分社会保険料),各月の所得税(N月分所得税),各月の賞与(N月分の賞与)
     3. 行の構成：それぞれ個人ごとに行を改行する。
     4. データがない項目は、項目名だけ書き、数字の場所は空欄(カンマのみ）にすること。
     5. 数字にカンマや「円」を含めないこと。
     6. 出力はcsvテキストのみ。余計な説明は一切不要。
-
-    【抽出項目キー】
-    personal_code, section_code, last_name, first_name, last_name_kana, first_name_kana,
-    gender (1=男, 2=女), hire_date, retire_date, zip_code, address1, address2,
-    salary_1~12 (各月の支給), social_insurance_1~12 (各月の社保), tax_1~12 (各月の税), bonus_1~12 (各月の賞与)
     """
 
-try:
+    try:
         if is_image:
+            # 画像の場合: プロンプトと画像オブジェクトをリストで渡す
             image = Image.open(content)
             response = model.generate_content([prompt_text, image])
         else:
+            # テキスト/Excelの場合
             response = model.generate_content(prompt_text + f"\n\n【データ】\n{content}")
 
-        # ★ここが修正ポイント：AIの生の返事を確認する
-        raw_text = response.text
-        print("--- AIからの返答 ---")
-        print(raw_text) # ターミナルに表示
-        print("-------------------")
-
-        # JSONのクリーニング処理
-        cleaned_json = raw_text.replace("```json", "").replace("```", "").strip()
-        
-        # 空っぽだった場合の対策
-        if not cleaned_json:
-            st.error("AIからの応答が空でした。APIキーやモデル名を確認してください。")
-            return []
-
+        cleaned_json = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(cleaned_json)
-
-    except json.JSONDecodeError:
-        # JSON変換に失敗したら、AIが何を言ったか画面に出す
-        st.error("AIが正しいデータを返しませんでした。以下の内容が返ってきました：")
-        st.text(raw_text) # 画面に生の返事を表示
-        return []
-        
     except Exception as e:
-        st.error(f"予期せぬエラーが発生しました: {e}")
+        st.error(f"AI解析エラー: {e}")
         return []
 
 # ==========================================
