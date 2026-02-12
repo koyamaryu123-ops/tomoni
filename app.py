@@ -75,17 +75,35 @@ def process_with_ai(content, mime_type, is_image=False):
 
 try:
         if is_image:
-            # 画像の場合: プロンプトと画像オブジェクトをリストで渡す
             image = Image.open(content)
             response = model.generate_content([prompt_text, image])
         else:
-            # テキスト/Excelの場合
             response = model.generate_content(prompt_text + f"\n\n【データ】\n{content}")
 
-        cleaned_json = response.text.replace("```json", "").replace("```", "").strip()
+        # ★ここが修正ポイント：AIの生の返事を確認する
+        raw_text = response.text
+        print("--- AIからの返答 ---")
+        print(raw_text) # ターミナルに表示
+        print("-------------------")
+
+        # JSONのクリーニング処理
+        cleaned_json = raw_text.replace("```json", "").replace("```", "").strip()
+        
+        # 空っぽだった場合の対策
+        if not cleaned_json:
+            st.error("AIからの応答が空でした。APIキーやモデル名を確認してください。")
+            return []
+
         return json.loads(cleaned_json)
+
+    except json.JSONDecodeError:
+        # JSON変換に失敗したら、AIが何を言ったか画面に出す
+        st.error("AIが正しいデータを返しませんでした。以下の内容が返ってきました：")
+        st.text(raw_text) # 画面に生の返事を表示
+        return []
+        
     except Exception as e:
-        st.error(f"AI解析エラー: {e}")
+        st.error(f"予期せぬエラーが発生しました: {e}")
         return []
 
 # ==========================================
