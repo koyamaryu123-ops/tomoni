@@ -31,7 +31,7 @@ st.markdown("""
 Excel、CSV、または **給与明細の画像** をアップロードすると、AIが自動で読み取り、
 ICSシステムに取り込める形式（CSV）に変換します。
 """)
-
+load_dotenv()
 # サイドバーでAPIキー入力（セキュリティのため）
 api_key = st.sidebar.text_input("Google API Keyを入力", type="password")
 if api_key:
@@ -45,7 +45,7 @@ uploaded_file = st.file_uploader("ファイルをドラッグ＆ドロップし�
 def process_with_ai(content, mime_type, is_image=False):
     """AIにデータを投げてJSON化する"""
    # 修正後
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    gemini_pro = genai.GenerativeModel("gemini-pro")
     
     prompt_text = """
     あなたは給与計算のプロフェッショナルです。
