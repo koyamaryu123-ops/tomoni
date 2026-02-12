@@ -31,7 +31,7 @@ st.markdown("""
 Excel、CSV、または **給与明細の画像** をアップロードすると、AIが自動で読み取り、
 ICSシステムに取り込める形式（CSV）に変換します。
 """)
-load_dotenv()
+
 # サイドバーでAPIキー入力（セキュリティのため）
 api_key = st.sidebar.text_input("Google API Keyを入力", type="password")
 if api_key:
