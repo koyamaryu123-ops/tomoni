@@ -3,6 +3,7 @@ import pandas as pd
 import google.generativeai as genai
 import json
 import io
+import csv
 from PIL import Image
 
 # ==========================================
@@ -32,7 +33,7 @@ Excel、CSV、または **給与明細の画像** をアップロードすると
 ICSシステムに取り込める形式（CSV）に変換します。
 """)
 
-# サイドバーでAPIキー入力（セキュリティのため）
+# サイドバーでAPIキー入力
 api_key = st.sidebar.text_input("Google API Keyを入力", type="password")
 if api_key:
     genai.configure(api_key=api_key)
@@ -44,50 +45,71 @@ uploaded_file = st.file_uploader("ファイルをドラッグ＆ドロップし�
 
 def process_with_ai(content, mime_type, is_image=False):
     """AIにデータを投げてJSON化する"""
-    model = genai.GenerativeModel('gemini-2.5-flash') # 画像認識も可能なモデル
     
+    # モデル設定（エラーが出る場合は gemini-1.5-flash 等に変更してください）
+    model = genai.GenerativeModel('gemini-2.5-flash') 
+    
+    # ★修正ポイント：プロンプトから「CSV出力ルール」を削除し、JSON出力に特化させました
     prompt_text = """
     あなたは給与計算のプロフェッショナルです。
-    提供されたデータ（テキストまたは画像）から、従業員の給与情報を読み取り、以下のJSON形式で出力してください。
+    提供されたデータ（テキストまたは画像）から、従業員の給与情報を読み取り、
+    **必ず以下のJSON形式のみ** で出力してください。
 
     【重要ルール】
     1. 金額の「円」やカンマ「,」はすべて削除し、半角数字のみにする。
     2. データが存在しない月や項目は、空文字 "" (引用符の中身なし) にする。
     3. 氏名は「姓」と「名」に分割する。
     4. 日付は YYYY/MM/DD 形式に統一する。
-    5. 出力は純粋なJSONテキストのみ（Markdownタグ不要）。
+    5. **出力は純粋なJSONテキストのみ返すこと。** Markdownタグ（```json 等）や挨拶文は一切不要です。
 
-    【抽出項目キー】
+    【抽出項目キー（JSONのキー名）】
     personal_code, section_code, last_name, first_name, last_name_kana, first_name_kana,
     gender (1=男, 2=女), hire_date, retire_date, zip_code, address1, address2,
     salary_1~12 (各月の支給), social_insurance_1~12 (各月の社保), tax_1~12 (各月の税), bonus_1~12 (各月の賞与)
-
     添付されたファイルから給与データを抽出し、ICS年末調整システムの入力形式に合わせて出力してください。一個入力がずれると全てずれてしまうことを加味し、正確に情報を読み取り、正確にファイルを作成しなさい。
 
 
 
+
+
+
+
     【出力ルール】
+
     1. 形式はcsvとし、ヘッダー(項目名)を必ず含めること。
+
     2. 列の並び：一行目に給与,12,月分,FMT,1,DBVER,二行目にテンプレ,タイプ,SL=4、3行目に個人コード,区分コード,氏名（姓）,氏名（名）,氏名フリガナ（姓）,氏名フリガナ（名）,性別,入社年月日,退職年月日,郵便番号,住所1,住所2,各月の支給額(N月分支給額).各月の社会保険料(N月分社会保険料),各月の所得税(N月分所得税),各月の賞与(N月分の賞与)
+
     3. 行の構成：それぞれ個人ごとに行を改行する。
+
     4. データがない項目は、項目名だけ書き、数字の場所は空欄(カンマのみ）にすること。
+
     5. 数字にカンマや「円」を含めないこと。
+
     6. 出力はcsvテキストのみ。余計な説明は一切不要。
     """
 
     try:
         if is_image:
-            # 画像の場合: プロンプトと画像オブジェクトをリストで渡す
             image = Image.open(content)
             response = model.generate_content([prompt_text, image])
         else:
-            # テキスト/Excelの場合
             response = model.generate_content(prompt_text + f"\n\n【データ】\n{content}")
+
+        # デバッグ用：AIの生の返答をログに出す（エラー時の確認用）
+        print(f"DEBUG: AI Response:\n{response.text}")
 
         cleaned_json = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(cleaned_json)
+        
     except Exception as e:
+        # 画面にもエラー詳細を表示
         st.error(f"AI解析エラー: {e}")
+        st.text("AIからの返答内容:")
+        try:
+            st.text(response.text) # AIが何を返したか確認できるようにする
+        except:
+            pass
         return []
 
 # ==========================================
@@ -95,7 +117,7 @@ def process_with_ai(content, mime_type, is_image=False):
 # ==========================================
 if uploaded_file and api_key:
     if st.button("AI解析スタート", type="primary"):
-        with st.spinner("AIがデータを解析中... 画像の場合は少し時間がかかります..."):
+        with st.spinner("AIがデータを解析中..."):
             
             # ファイル形式ごとの前処理
             input_content = None
@@ -108,38 +130,31 @@ if uploaded_file and api_key:
                 df = pd.read_excel(uploaded_file)
                 input_content = df.to_csv(index=False)
             else:
-                # 画像ファイルの場合
                 input_content = uploaded_file
                 is_image = True
 
             # AI解析実行
             data_list = process_with_ai(input_content, uploaded_file.type, is_image=is_image)
             
-            if isinstance(data_list, dict): # リストじゃなく単一オブジェクトで返ってきた場合の補正
+            if isinstance(data_list, dict): 
                 data_list = [data_list]
 
             if data_list:
                 st.success(f"{len(data_list)}件のデータを抽出しました！")
                 
-                # データフレーム作成（プレビュー用）
+                # プレビュー表示
                 preview_df = pd.DataFrame(data_list)
                 st.dataframe(preview_df)
 
-                # ------------------------------------------
                 # ICS形式 CSV生成処理
-                # ------------------------------------------
                 output = io.StringIO()
-                # ICSはShift_JIS (cp932) が必須だが、StringIOは文字列。
-                # 最終的にバイト列に変換してダウンロードさせる。
-                
-                # ヘッダー書き込み (ICS仕様)
                 writer = csv.writer(output)
+                
+                # ICSヘッダー
                 writer.writerow(["給与", "12", "月分", "FMT", "1", "DBVER"])
                 writer.writerow(["テンプレ", "タイプ", "SL=4"])
                 writer.writerow(ICS_HEADERS)
 
-                # データ書き込み
-                import csv
                 for entry in data_list:
                     row = []
                     # 基本情報
@@ -160,13 +175,13 @@ if uploaded_file and api_key:
                     
                     for key in ["salary", "social_insurance", "tax", "bonus"]:
                         for i in range(1, 13):
+                            # JSONキーは salary_1, salary_2... となっている想定
                             row.append(fmt(entry.get(f"{key}_{i}")))
+                            
                     writer.writerow(row)
 
-                # 文字列をCP932(Shift_JIS)バイト列に変換
                 csv_data = output.getvalue().encode("cp932", errors="ignore")
 
-                # ダウンロードボタン
                 st.download_button(
                     label="ICS取込用CSVをダウンロード",
                     data=csv_data,
@@ -174,7 +189,7 @@ if uploaded_file and api_key:
                     mime="text/csv"
                 )
             else:
-                st.warning("データを抽出できませんでした。")
+                st.warning("データを抽出できませんでした。AIの応答を確認してください。")
 
 elif not api_key:
     st.info("👈 左のサイドバーにGoogle APIキーを入力してください。")
