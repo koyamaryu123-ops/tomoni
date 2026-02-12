@@ -1,3 +1,4 @@
+pip install google-generativeai python-dotenv
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
@@ -56,6 +57,15 @@ def process_with_ai(content, mime_type, is_image=False):
     3. 氏名は「姓」と「名」に分割する。
     4. 日付は YYYY/MM/DD 形式に統一する。
     5. 出力は純粋なJSONテキストのみ（Markdownタグ不要）。
+
+    【出力ルール】
+
+    1. 形式はcsvとし、ヘッダー(項目名)を必ず含めること。
+    2. 列の並び：一行目に給与,12,月分,FMT,1,DBVER,二行目にテンプレ,タイプ,SL=4、3行目に個人コード,区分コード,氏名（姓）,氏名（名）,氏名フリガナ（姓）,氏名フリガナ（名）,性別,入社年月日,退職年月日,郵便番号,住所1,住所2,各月の支給額(N月分支給額).各月の社会保険料(N月分社会保険料),各月の所得税(N月分所得税),各月の賞与(N月分の賞与)
+    3. 行の構成：それぞれ個人ごとに行を改行する。
+    4. データがない項目は、項目名だけ書き、数字の場所は空欄(カンマのみ）にすること。
+    5. 数字にカンマや「円」を含めないこと。
+    6. 出力はcsvテキストのみ。余計な説明は一切不要。
 
     【抽出項目キー】
     personal_code, section_code, last_name, first_name, last_name_kana, first_name_kana,
