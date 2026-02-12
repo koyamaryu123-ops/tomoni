@@ -44,7 +44,7 @@ uploaded_file = st.file_uploader("ファイルをドラッグ＆ドロップし�
 
 def process_with_ai(content, mime_type, is_image=False):
     """AIにデータを投げてJSON化する"""
-    model = genai.GenerativeModel('gemini-1.5-pro') # 画像認識も可能なモデル
+    model = genai.GenerativeModel('gemini-2.5-flash') # 画像認識も可能なモデル
     
     prompt_text = """
     あなたは給与計算のプロフェッショナルです。
