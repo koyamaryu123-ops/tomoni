@@ -144,4 +144,26 @@ if uploaded_files and api_key:
             # プレビュー
             st.text_area("CSVプレビュー (結合結果)", final_csv_content, height=200)
 
-            # ダウン
+            # ダウンロード
+            try:
+                csv_bytes = final_csv_content.encode("cp932", errors="ignore")
+                st.download_button(
+                    label="統合されたICS用CSVをダウンロード",
+                    data=csv_bytes,
+                    file_name="ics_import_merged.csv",
+                    mime="text/csv"
+                )
+            except Exception as e:
+                st.error(f"文字コード変換エラー: {e}")
+        
+        else:
+            st.warning("有効なデータが1件も抽出できませんでした。")
+
+        # エラーがあったファイルの表示
+        if error_logs:
+            st.error("一部のファイルでエラーが発生しました:")
+            for err in error_logs:
+                st.text(err)
+
+elif not api_key:
+    st.info("👈 左のサイドバーにGoogle APIキーを入力してください。")
