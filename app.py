@@ -10,9 +10,9 @@ from PIL import Image
 # ==========================================
 st.set_page_config(page_title="ICS年末調整データ作成ツール", layout="wide")
 
-st.title("📄 ICS年末調整データ作成 AIツール (一括処理版)")
+st.title("📄 ICS年末調整データ作成 AIツール (PDF対応・一括処理版)")
 st.markdown("""
-複数の Excel、CSV、**給与明細の画像** をまとめてアップロードできます。
+複数の Excel、CSV、**給与明細の画像・PDF** をまとめてアップロードできます。
 AIが全てのデータを読み取り、**1つのICS用CSVファイル** に統合して出力します。
 """)
 
@@ -26,15 +26,16 @@ if api_key:
 # ==========================================
 uploaded_files = st.file_uploader(
     "ファイルをまとめてドラッグ＆ドロップしてください", 
-    type=["xlsx", "xls", "csv", "png", "jpg", "jpeg"],
-    accept_multiple_files=True  # ★ここが重要：複数選択OK
+    type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], # ★PDFを追加しました
+    accept_multiple_files=True
 )
 
-def process_single_file(content, filename, is_image=False):
+def process_single_file(content, filename, file_type="text"):
     """1つのファイルをAIに解析させ、データ行(CSV)だけを取り出す"""
     
     model = genai.GenerativeModel('gemini-2.5-flash') 
     
+    # プロンプト（元の内容を維持）
     prompt_text = """
     あなたは給与計算のプロフェッショナルです。
     提供されたデータから給与情報を抽出し、ICS年末調整システム用のCSVデータを作成してください。
@@ -51,7 +52,6 @@ def process_single_file(content, filename, is_image=False):
     添付されたファイルから給与データを抽出し、ICS年末調整システムの入力形式に合わせて出力してください。一個入力がずれると全てずれてしまうことを加味し、正確に情報を読み取り、正確にファイルを作成しなさい。
 
     【出力ルール】
-
     1. 形式はcsvとし、ヘッダー(項目名)を必ず含めること。
     2. 行の構成：それぞれ個人ごとに行を改行する。
     3. データがない項目は、項目名だけ書き、数字の場所は空欄(カンマのみ）にすること。
@@ -60,10 +60,19 @@ def process_single_file(content, filename, is_image=False):
     """
 
     try:
-        if is_image:
-            image = Image.open(content)
+        # ★ファイルタイプに応じた処理に変更
+        if file_type == "pdf":
+            # PDF用のデータ構造を作成
+            pdf_data = {'mime_type': 'application/pdf', 'data': content}
+            response = model.generate_content([prompt_text, pdf_data])
+            
+        elif file_type == "image":
+            # 画像処理
+            image = Image.open(io.BytesIO(content))
             response = model.generate_content([prompt_text, image])
+            
         else:
+            # テキスト(Excel/CSV)処理
             response = model.generate_content(prompt_text + f"\n\n【ファイル名: {filename} のデータ】\n{content}")
 
         # 結果のクリーニング
@@ -92,23 +101,33 @@ if uploaded_files and api_key:
         for i, file in enumerate(uploaded_files):
             status_text.text(f"解析中 ({i+1}/{total_files}): {file.name} ...")
             
-            # 前処理
+            # 前処理変数の初期化
             input_content = None
-            is_image = False
+            file_type = "text" # デフォルト
             
             try:
-                if file.name.endswith('.csv'):
+                if file.name.endswith('.pdf'):
+                    # ★PDF対応: そのままバイト列として読み込む
+                    input_content = file.read()
+                    file_type = "pdf"
+                    
+                elif file.name.endswith(('.png', '.jpg', '.jpeg')):
+                    # ★画像対応: バイト列として読み込む
+                    input_content = file.read()
+                    file_type = "image"
+                    
+                elif file.name.endswith('.csv'):
                     df = pd.read_csv(file)
                     input_content = df.to_csv(index=False)
+                    file_type = "text"
+                    
                 elif file.name.endswith(('.xlsx', '.xls')):
                     df = pd.read_excel(file)
                     input_content = df.to_csv(index=False)
-                else:
-                    input_content = file
-                    is_image = True
+                    file_type = "text"
                 
-                # AI処理呼び出し
-                result_csv_text = process_single_file(input_content, file.name, is_image)
+                # AI処理呼び出し (引数を変更しました)
+                result_csv_text = process_single_file(input_content, file.name, file_type)
                 
                 if result_csv_text.startswith("ERROR"):
                     error_logs.append(result_csv_text)
@@ -122,7 +141,9 @@ if uploaded_files and api_key:
 
             # 進捗バー更新
             progress_bar.progress((i + 1) / total_files)
-            time.sleep(0.5) # API制限回避のための少しの休憩
+            
+            # ★重要変更: API制限回避のため 0.5秒 -> 3.0秒 に変更
+            time.sleep(3.0) 
 
         status_text.text("全ファイルの解析が完了しました！ CSVを作成しています...")
 
@@ -132,7 +153,7 @@ if uploaded_files and api_key:
             final_csv_content = "給与,12,月分,FMT,1,DBVER\n"
             final_csv_content += "テンプレ,タイプ,SL=4\n"
             
-            # 2. 項目名ヘッダー
+            # 2. 項目名ヘッダー（元のコードのまま）
             ics_header_row = "個人コード,区分コード,氏名（姓）,氏名（名）,氏名フリガナ（姓）,氏名フリガナ（名）,性別,入社年月日,退職年月日,郵便番号,住所1,住所2,1月支給,2月支給,3月支給,4月支給,5月支給,6月支給,7月支給,8月支給,9月支給,10月支給,11月支給,12月支給,1月社会保険料,2月社会保険料,3月社会保険料,4月社会保険料,5月社会保険料,6月社会保険料,7月社会保険料,8月社会保険料,9月社会保険料,10月社会保険料,11月社会保険料,12月社会保険料,1月所得税,2月所得税,3月所得税,4月所得税,5月所得税,6月所得税,7月所得税,8月所得税,9月所得税,10月所得税,11月所得税,12月所得税,1月賞与,2月賞与,3月賞与,4月賞与,5月賞与,6月賞与,7月賞与,8月賞与,9月賞与,10月賞与,11月賞与,12月賞与"
             final_csv_content += ics_header_row + "\n"
             
