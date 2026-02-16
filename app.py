@@ -26,7 +26,7 @@ if 'processed_files' not in st.session_state:
     st.session_state.processed_files = set()
 
 # サイドバーでAPIキー入力
-api_key = st.sidebar.text_input("Google API Keyを入力", type="password")
+api_key = st.sidebar.text_input("AIzaSyDF52-dDqEnCwu5j-xnKaqR0tfpMx8V2Qg", type="password")
 if api_key:
     genai.configure(api_key=api_key)
 
