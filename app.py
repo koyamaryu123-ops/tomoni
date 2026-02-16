@@ -48,7 +48,7 @@ uploaded_files = st.file_uploader(
 def process_single_file(content, filename, file_type="text"):
     """1つのファイルをAIに解析させ、データ行(CSV)だけを取り出す"""
     
-    model = genai.GenerativeModel('gemini-2.5-flash') 
+    model = genai.GenerativeModel('gemini-3-flash') 
     
     # プロンプト（変更なし）
     prompt_text = """
