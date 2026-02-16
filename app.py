@@ -4,7 +4,7 @@ import google.generativeai as genai
 import io
 import time
 from PIL import Image
-import streamlit.components.v1 as components # 通知機能のために追加
+import streamlit.components.v1 as components
 
 # ==========================================
 # ページ設定
@@ -25,24 +25,21 @@ if 'accumulated_rows' not in st.session_state:
 if 'final_csv_data' not in st.session_state:
     st.session_state.final_csv_data = None
 
+# ★追加: アップローダーをリセットするためのID管理
+if 'uploader_id' not in st.session_state:
+    st.session_state.uploader_id = 0
+
 # サイドバーでAPIキー入力
 api_key = st.sidebar.text_input("AIzaSyDCRsVPD7krj2iYrwrogh37RCsplx8S5lc", type="password")
 if api_key:
     genai.configure(api_key=api_key)
 
 # サイドバーにリセットボタン配置
-if st.sidebar.button("データをリセット"):
+# ★変更: ボタン名を「リセットボタン」にし、押下時にアップローダーIDを更新して全クリア
+if st.sidebar.button("リセットボタン"):
     st.session_state.accumulated_rows = []
     st.session_state.final_csv_data = None
-    st.rerun()
-
-# ★追加: ファイル一括削除ボタン
-if st.sidebar.button("ファイルを一括削除"):
-    # アップローダーのキーをセッションから削除することで強制的にクリアする
-    keys_to_clear = ["uploader_normal", "uploader_split", "uploader_overwrite"]
-    for key in keys_to_clear:
-        if key in st.session_state:
-            del st.session_state[key]
+    st.session_state.uploader_id += 1 # IDを増やしてウィジェットを強制リフレッシュ
     st.rerun()
 
 # ==========================================
@@ -50,35 +47,37 @@ if st.sidebar.button("ファイルを一括削除"):
 # ==========================================
 col1, col2, col3 = st.columns(3)
 
+# ★重要: keyに uploader_id を含めることで、リセット時に新しいウィジェットとして認識させ、中身を空にする
+current_id = st.session_state.uploader_id
+
 with col1:
     st.subheader("① 通常データ")
-    st.caption("Excelのまとめファイルや、1ファイルで完結しているデータ")
+    st.caption("Excelのまとめファイルや、1ファイル完結型のデータ")
     uploaded_files_normal = st.file_uploader(
         "ドラッグ＆ドロップ", 
         type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
         accept_multiple_files=True,
-        key="uploader_normal"
+        key=f"uploader_normal_{current_id}" 
     )
 
 with col2:
     st.subheader("② 分割データ")
-    st.caption("**1人のデータが複数のファイル（画像等）に分かれている場合**")
-    st.caption("※氏名等のキー項目が含まれている必要があります")
+    st.caption("**1人のデータが複数ファイルに分かれている場合** (例: 1月〜12月の明細がバラバラ)")
     uploaded_files_split = st.file_uploader(
         "ドラッグ＆ドロップ", 
         type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
         accept_multiple_files=True,
-        key="uploader_split"
+        key=f"uploader_split_{current_id}"
     )
 
 with col3:
     st.subheader("③ 修正・上書き用")
-    st.caption("①②のデータに対し、**後から情報を上書き修正したい**ファイル")
+    st.caption("①②のデータに対し、**後から情報を追加・修正したい場合**のファイル")
     uploaded_files_overwrite = st.file_uploader(
         "ドラッグ＆ドロップ", 
         type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
         accept_multiple_files=True,
-        key="uploader_overwrite"
+        key=f"uploader_overwrite_{current_id}"
     )
 
 def process_single_file(content, filename, file_type="text"):
@@ -114,12 +113,9 @@ def process_single_file(content, filename, file_type="text"):
         if file_type == "pdf":
             pdf_data = {'mime_type': 'application/pdf', 'data': content}
             response = model.generate_content([prompt_text, pdf_data])
-            
         elif file_type == "image":
-            # 画像処理：RGB変換を追加して安定性を向上
-            image = Image.open(io.BytesIO(content)).convert('RGB')
+            image = Image.open(io.BytesIO(content))
             response = model.generate_content([prompt_text, image])
-            
         else:
             response = model.generate_content(prompt_text + f"\n\n【ファイル名: {filename} のデータ】\n{content}")
 
@@ -152,13 +148,11 @@ def merge_rows(all_rows):
         data_list.append(split_row)
 
     df = pd.DataFrame(data_list, columns=columns)
-    # 空白文字をNaNに変換（これでgroupby.lastが効くようになる）
     df = df.replace(r'^\s*$', None, regex=True)
 
     group_keys = ['個人コード', '氏名（姓）', '氏名（名）']
     
-    # ★重要: last() を使用することで、後から読み込んだファイル（③上書き用）のデータを優先します。
-    # また、②分割データの場合も、空白でないデータが後から来ればそれが採用されます。
+    # 後から読み込んだファイルのデータを優先（上書き）
     df_merged = df.groupby(group_keys, as_index=False).last()
     df_merged = df_merged.fillna("")
 
@@ -172,7 +166,6 @@ def merge_rows(all_rows):
 # ==========================================
 # 実行ボタン
 # ==========================================
-# 処理順序リストを作成 (① -> ② -> ③ の順)
 processing_list = []
 if uploaded_files_normal:
     processing_list.extend(uploaded_files_normal)
