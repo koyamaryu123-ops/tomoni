@@ -26,9 +26,9 @@ if 'processed_files' not in st.session_state:
     st.session_state.processed_files = set()
 
 # サイドバーでAPIキー入力
-api_key = st.sidebar.text_input("AIzaSyDF52-dDqEnCwu5j-xnKaqR0tfpMx8V2Qg", type="password")
+api_key = st.sidebar.text_input("APIkeyを入力", type="password")
 if api_key:
-    genai.configure(api_key=AIzaSyDF52-dDqEnCwu5j-xnKaqR0tfpMx8V2Qg)
+    genai.configure(api_key=api_key)
 
 # サイドバーにリセットボタン配置
 if st.sidebar.button("データをリセット"):
