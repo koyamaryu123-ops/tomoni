@@ -213,7 +213,7 @@ if uploaded_files and api_key:
                         rows = [r for r in result_csv_text.split('\n') if r.strip()]
                         current_batch_rows.extend(rows)
                     
-                    # ★削除済み: time.sleep(5.0) の待機処理
+                    # ★待機時間(time.sleep)を削除しました（有料版対応）
 
             except Exception as e:
                 error_logs.append(f"ERROR: {file.name} の読み込み失敗: {e}")
@@ -243,6 +243,10 @@ if uploaded_files and api_key:
             
             # 3. 結合
             final_csv_content += "\n".join(merged_rows)
+
+            # ★完了通知の追加
+            st.toast("すべての解析が完了しました！", icon="🎉")
+            st.balloons()
 
             st.success(f"現在のデータ総数（統合後）: {len(merged_rows)} 人分")
             
