@@ -83,7 +83,7 @@ with col3:
 def process_single_file(content, filename, file_type="text"):
     """1つのファイルをAIに解析させ、データ行(CSV)だけを取り出す"""
     
-    model = genai.GenerativeModel('gemini-2.5-flash') 
+    model = genai.GenerativeModel('gemini-3-flash-preview') 
     
     # プロンプト（変更なし）
     prompt_text = """
