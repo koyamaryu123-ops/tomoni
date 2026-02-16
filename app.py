@@ -4,6 +4,7 @@ import google.generativeai as genai
 import io
 import time
 from PIL import Image
+import streamlit.components.v1 as components # 通知機能のために追加
 
 # ==========================================
 # ページ設定
@@ -12,7 +13,8 @@ st.set_page_config(page_title="ICS年末調整データ作成ツール", layout=
 
 st.title("📄 ICS年末調整データ作成 AIツール (PDF対応・一括処理版)")
 st.markdown("""
-以下の3つの項目に分けてファイルをアップロードできます。AIが全てのデータを読み取り、**1つのICS用CSVファイル** に統合・上書きして出力します。
+以下の3つの項目に分けてファイルをアップロードできます。
+AIが全てのデータを読み取り、**①→②→③の順に統合・上書き**して1つのCSVを出力します。
 """)
 
 # ==========================================
@@ -41,7 +43,7 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.subheader("① 通常データ")
-    st.caption("Excelのまとめファイルや、1ファイル完結型のデータ")
+    st.caption("Excelのまとめファイルや、1ファイルで完結しているデータ")
     uploaded_files_normal = st.file_uploader(
         "ドラッグ＆ドロップ", 
         type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
@@ -51,7 +53,8 @@ with col1:
 
 with col2:
     st.subheader("② 分割データ")
-    st.caption("**1人のデータが複数ファイルに分かれている場合** (例: 1月〜12月の明細がバラバラ)")
+    st.caption("**1人のデータが複数のファイル（画像等）に分かれている場合**")
+    st.caption("※氏名等のキー項目が含まれている必要があります")
     uploaded_files_split = st.file_uploader(
         "ドラッグ＆ドロップ", 
         type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
@@ -61,7 +64,7 @@ with col2:
 
 with col3:
     st.subheader("③ 修正・上書き用")
-    st.caption("①②のデータに対し、**後から情報を追加・修正したい場合**のファイル")
+    st.caption("①②のデータに対し、**後から情報を上書き修正したい**ファイル")
     uploaded_files_overwrite = st.file_uploader(
         "ドラッグ＆ドロップ", 
         type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
@@ -102,9 +105,12 @@ def process_single_file(content, filename, file_type="text"):
         if file_type == "pdf":
             pdf_data = {'mime_type': 'application/pdf', 'data': content}
             response = model.generate_content([prompt_text, pdf_data])
+            
         elif file_type == "image":
-            image = Image.open(io.BytesIO(content))
+            # 画像処理：RGB変換を追加して安定性を向上
+            image = Image.open(io.BytesIO(content)).convert('RGB')
             response = model.generate_content([prompt_text, image])
+            
         else:
             response = model.generate_content(prompt_text + f"\n\n【ファイル名: {filename} のデータ】\n{content}")
 
@@ -137,13 +143,13 @@ def merge_rows(all_rows):
         data_list.append(split_row)
 
     df = pd.DataFrame(data_list, columns=columns)
+    # 空白文字をNaNに変換（これでgroupby.lastが効くようになる）
     df = df.replace(r'^\s*$', None, regex=True)
 
     group_keys = ['個人コード', '氏名（姓）', '氏名（名）']
     
-    # ★変更点: 上書きに対応するため、first() ではなく last() を使用します。
-    # これにより、後から読み込んだファイル（③上書き用）のデータが優先されます。
-    # groupby().last() は、グループ内の「最後の有効な値（NaN以外）」を採用します。
+    # ★重要: last() を使用することで、後から読み込んだファイル（③上書き用）のデータを優先します。
+    # また、②分割データの場合も、空白でないデータが後から来ればそれが採用されます。
     df_merged = df.groupby(group_keys, as_index=False).last()
     df_merged = df_merged.fillna("")
 
@@ -157,8 +163,7 @@ def merge_rows(all_rows):
 # ==========================================
 # 実行ボタン
 # ==========================================
-# ファイルを処理する順番を定義（①通常 -> ②分割 -> ③上書き の順にリスト化）
-# これにより、③がリストの最後に来るため、merge_rowsのlast()で優先的に採用される
+# 処理順序リストを作成 (① -> ② -> ③ の順)
 processing_list = []
 if uploaded_files_normal:
     processing_list.extend(uploaded_files_normal)
@@ -246,7 +251,7 @@ if processing_list and api_key:
                 st.session_state.final_csv_data = final_csv_content.encode("utf-8")
 
             # ★完了通知（JavaScriptによるデスクトップ通知）
-            # ブラウザの設定で通知許可が必要です
+            # Streamlit Componentsを使用してスクリプトを実行
             notification_js = """
             <script>
                 function notify() {
@@ -269,7 +274,8 @@ if processing_list and api_key:
                 notify();
             </script>
             """
-            st.components.v1.html(notification_js, height=0)
+            components.html(notification_js, height=0)
+            
             st.success("🎉 全ての解析が完了しました！(PCに通知を送信しました)")
             
         else:
