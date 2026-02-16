@@ -35,7 +35,6 @@ if api_key:
     genai.configure(api_key=api_key)
 
 # サイドバーにリセットボタン配置
-# ★変更: ボタン名を「リセットボタン」にし、押下時にアップローダーIDを更新して全クリア
 if st.sidebar.button("リセットボタン"):
     st.session_state.accumulated_rows = []
     st.session_state.final_csv_data = None
@@ -61,8 +60,9 @@ with col1:
     )
 
 with col2:
-    st.subheader("② 分割データ")
-    st.caption("**1人のデータが複数ファイルに分かれている場合** (例: 1月〜12月の明細がバラバラ)")
+    # ★変更: タイトルに「複数ファイル」の旨を明記
+    st.subheader("② 分割データ (1人のデータが複数ファイルの場合)")
+    st.caption("例: 1月〜12月の給与明細画像がバラバラにある場合など")
     uploaded_files_split = st.file_uploader(
         "ドラッグ＆ドロップ", 
         type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
@@ -114,7 +114,8 @@ def process_single_file(content, filename, file_type="text"):
             pdf_data = {'mime_type': 'application/pdf', 'data': content}
             response = model.generate_content([prompt_text, pdf_data])
         elif file_type == "image":
-            image = Image.open(io.BytesIO(content))
+            # ★修正: PNGなどの透過画像でエラーが出るのを防ぐため、RGBに変換
+            image = Image.open(io.BytesIO(content)).convert('RGB')
             response = model.generate_content([prompt_text, image])
         else:
             response = model.generate_content(prompt_text + f"\n\n【ファイル名: {filename} のデータ】\n{content}")
