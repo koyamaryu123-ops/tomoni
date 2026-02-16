@@ -3,7 +3,7 @@ import pandas as pd
 import google.generativeai as genai
 import io
 import time
-from PIL import Image
+from PIL import Image, ImageOps # ★ImageOpsを追加
 import streamlit.components.v1 as components
 
 # ==========================================
@@ -25,7 +25,7 @@ if 'accumulated_rows' not in st.session_state:
 if 'final_csv_data' not in st.session_state:
     st.session_state.final_csv_data = None
 
-# ★追加: アップローダーをリセットするためのID管理
+# アップローダーをリセットするためのID管理
 if 'uploader_id' not in st.session_state:
     st.session_state.uploader_id = 0
 
@@ -46,7 +46,7 @@ if st.sidebar.button("リセットボタン"):
 # ==========================================
 col1, col2, col3 = st.columns(3)
 
-# ★重要: keyに uploader_id を含めることで、リセット時に新しいウィジェットとして認識させ、中身を空にする
+# keyに uploader_id を含めることで、リセット時に新しいウィジェットとして認識させ、中身を空にする
 current_id = st.session_state.uploader_id
 
 with col1:
@@ -60,7 +60,6 @@ with col1:
     )
 
 with col2:
-    # ★変更: タイトルに「複数ファイル」の旨を明記
     st.subheader("② 分割データ (1人のデータが複数ファイルの場合)")
     st.caption("例: 1月〜12月の給与明細画像がバラバラにある場合など")
     uploaded_files_split = st.file_uploader(
@@ -83,7 +82,8 @@ with col3:
 def process_single_file(content, filename, file_type="text"):
     """1つのファイルをAIに解析させ、データ行(CSV)だけを取り出す"""
     
-    model = genai.GenerativeModel('gemini-3-flash-preview') 
+    # ★変更: 手書き文字や画像の認識精度を高めるため、'gemini-1.5-pro' に変更
+    model = genai.GenerativeModel('gemini-3-pro-preview') 
     
     # プロンプト（変更なし）
     prompt_text = """
@@ -114,8 +114,10 @@ def process_single_file(content, filename, file_type="text"):
             pdf_data = {'mime_type': 'application/pdf', 'data': content}
             response = model.generate_content([prompt_text, pdf_data])
         elif file_type == "image":
-            # ★修正: PNGなどの透過画像でエラーが出るのを防ぐため、RGBに変換
-            image = Image.open(io.BytesIO(content)).convert('RGB')
+            # ★修正: 画像の向き(Exif)を補正し、RGBに変換
+            img = Image.open(io.BytesIO(content))
+            img = ImageOps.exif_transpose(img) 
+            image = img.convert('RGB')
             response = model.generate_content([prompt_text, image])
         else:
             response = model.generate_content(prompt_text + f"\n\n【ファイル名: {filename} のデータ】\n{content}")
