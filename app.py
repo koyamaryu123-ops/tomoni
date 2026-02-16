@@ -63,6 +63,9 @@ ICS_COLUMNS = [
 
 def process_single_content(content, source_name, file_type="text"):
     """AI解析処理（リトライ機能付き）"""
+    model = genai.GenerativeModel('gemini-2.5-flash') 
+    
+    prompt_text = """
 
 あなたは給与計算のプロフェッショナルです。
 
