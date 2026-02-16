@@ -27,7 +27,7 @@ if 'final_csv_data' not in st.session_state:
     st.session_state.final_csv_data = None
 
 # サイドバーでAPIキー入力
-api_key = st.sidebar.text_input("Google API Keyを入力", type="password")
+api_key = st.sidebar.text_input("AIzaSyDCRsVPD7krj2iYrwrogh37RCsplx8S5lc", type="password")
 if api_key:
     genai.configure(api_key=api_key)
 
