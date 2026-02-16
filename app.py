@@ -18,37 +18,52 @@ AIが全てのデータを読み取り、**1つのICS用CSVファイル** に統
 """)
 
 # ==========================================
-# セッション状態の初期化（追加読み込み用）
+# セッション状態の初期化
 # ==========================================
 if 'accumulated_rows' not in st.session_state:
     st.session_state.accumulated_rows = []
-if 'processed_files' not in st.session_state:
-    st.session_state.processed_files = set()
+# 処理完了後のCSVデータを保持するための変数
+if 'final_csv_data' not in st.session_state:
+    st.session_state.final_csv_data = None
 
 # サイドバーでAPIキー入力
-api_key = st.sidebar.text_input("AIzaSyDCRsVPD7krj2iYrwrogh37RCsplx8S5lc", type="password")
+api_key = st.sidebar.text_input("Google API Keyを入力", type="password")
 if api_key:
     genai.configure(api_key=api_key)
 
 # サイドバーにリセットボタン配置
 if st.sidebar.button("データをリセット"):
     st.session_state.accumulated_rows = []
-    st.session_state.processed_files = set()
+    st.session_state.final_csv_data = None
     st.rerun()
 
 # ==========================================
-# ファイルアップロード (複数対応)
+# エリア1: 通常の給与データアップロード
 # ==========================================
-uploaded_files = st.file_uploader(
-    "ファイルをまとめてドラッグ＆ドロップしてください", 
+st.subheader("① 給与明細・台帳データのアップロード")
+uploaded_files_main = st.file_uploader(
+    "いつもの給与データはこちら", 
     type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    key="uploader_main"
+)
+
+# ==========================================
+# エリア2: 給与申告書（追加データ）アップロード
+# ==========================================
+st.subheader("② 給与申告書（追加修正用）のアップロード")
+st.info("※ここでアップロードしたデータは、上のデータに追加・統合されます。")
+uploaded_files_sub = st.file_uploader(
+    "給与申告書など、追加したいファイルはこちら", 
+    type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
+    accept_multiple_files=True,
+    key="uploader_sub"
 )
 
 def process_single_file(content, filename, file_type="text"):
     """1つのファイルをAIに解析させ、データ行(CSV)だけを取り出す"""
     
-    model = genai.GenerativeModel('gemini-3-pro-preview') 
+    model = genai.GenerativeModel('gemini-2.5-flash') 
     
     # プロンプト（変更なし）
     prompt_text = """
@@ -75,20 +90,15 @@ def process_single_file(content, filename, file_type="text"):
     """
 
     try:
-        # ファイルタイプに応じた処理
         if file_type == "pdf":
             pdf_data = {'mime_type': 'application/pdf', 'data': content}
             response = model.generate_content([prompt_text, pdf_data])
-            
         elif file_type == "image":
             image = Image.open(io.BytesIO(content))
             response = model.generate_content([prompt_text, image])
-            
         else:
-            # テキスト(Excel/CSV)処理
             response = model.generate_content(prompt_text + f"\n\n【ファイル名: {filename} のデータ】\n{content}")
 
-        # 結果のクリーニング
         raw_text = response.text.replace("```csv", "").replace("```", "").strip()
         return raw_text
         
@@ -96,13 +106,10 @@ def process_single_file(content, filename, file_type="text"):
         return f"ERROR: {filename} の解析に失敗: {e}"
 
 def merge_rows(all_rows):
-    """
-    収集したCSV行データをDataFrame化し、個人コードと氏名で名寄せ（統合）を行う関数
-    """
+    """収集したCSV行データをDataFrame化し、個人コードと氏名で名寄せ（統合）を行う関数"""
     if not all_rows:
         return []
 
-    # プロンプトで指定されているカラム定義（59列）
     columns = [
         "個人コード","区分コード","氏名（姓）","氏名（名）","氏名フリガナ（姓）","氏名フリガナ（名）","性別","入社年月日","退職年月日","郵便番号","住所1","住所2",
         "1月支給","2月支給額","3月支給額","4月支給額","5月支給額","6月支給額","7月支給額","8月支給額","9月支給額","10月支給額","11月支給額","12月支給額",
@@ -111,12 +118,9 @@ def merge_rows(all_rows):
         "1月賞与","2月賞与","3月賞与","4月賞与","5月賞与","6月賞与","7月賞与","8月賞与","9月賞与","10月賞与","11月賞与","12月賞与"
     ]
 
-    # CSV文字列をパースしてDataFrame化
     data_list = []
     for row_str in all_rows:
-        # カンマ区切りで分割（ダブルクォート等は簡易的に除去）
         split_row = [x.strip().replace('"', '') for x in row_str.split(',')]
-        # 列数が足りない場合は空文字で埋める、多い場合は切り捨てる
         if len(split_row) < len(columns):
             split_row += [""] * (len(columns) - len(split_row))
         else:
@@ -124,28 +128,18 @@ def merge_rows(all_rows):
         data_list.append(split_row)
 
     df = pd.DataFrame(data_list, columns=columns)
-
-    # 統合処理：個人コード、氏名（姓）、氏名（名）が同じ行をグループ化し、欠損値を埋める
-    # method: groupbyして、それぞれの列で「最初の空じゃない値」を採用する
-    # ※個人コードがない行は統合できないため、便宜上そのまま残す
-    
-    # 空文字をNaNに変換して、combine_first等が効くようにする
     df = df.replace(r'^\s*$', None, regex=True)
 
-    # グループ化キー（個人コードと氏名）
     group_keys = ['個人コード', '氏名（姓）', '氏名（名）']
     
-    # 統合実行（各カラムについて、グループ内で有効な値があればそれを採用）
-    # 'first' は None を飛ばしてくれるので、有効な値がマージされる
+    # 統合実行: 同じ人のデータがあれば、後から来たデータの空白でない部分で埋めるイメージ
+    # groupby().first() は「最初の有効な値」を取るため、順序によっては上書きされない場合があるが、
+    # 基本的には情報が集約される
     df_merged = df.groupby(group_keys, as_index=False).first()
-
-    # NaNを再度空文字に戻す
     df_merged = df_merged.fillna("")
 
-    # CSV行リストに戻す
     merged_rows = []
     for _, row in df_merged.iterrows():
-        # 各要素を文字列にしてカンマ連結
         row_str = ",".join([str(x) for x in row.values])
         merged_rows.append(row_str)
         
@@ -154,37 +148,35 @@ def merge_rows(all_rows):
 # ==========================================
 # 実行ボタン
 # ==========================================
-if uploaded_files and api_key:
-    # 処理対象のファイルをフィルタリング（まだ処理していないファイルのみ）
-    # ※再アップロードの場合は同じ名前でも別物として扱うため、ここでは簡易的に全て処理対象とする運用も可だが
-    #   今回は「追加読み込み」の文脈なので、ボタンを押したらその時選択されているファイルを処理して追記する
+# アップロードされた全ファイルをまとめる
+all_uploaded_files = []
+if uploaded_files_main:
+    all_uploaded_files.extend(uploaded_files_main)
+if uploaded_files_sub:
+    all_uploaded_files.extend(uploaded_files_sub)
+
+if all_uploaded_files and api_key:
     
-    if st.button(f"選択した {len(uploaded_files)} 件のファイルを解析・追加", type="primary"):
+    if st.button(f"全 {len(all_uploaded_files)} 件のファイルを一括解析・統合", type="primary"):
         
         progress_bar = st.progress(0)
         status_text = st.empty()
         error_logs = []
         
-        # 今回の処理で取得した行リスト
         current_batch_rows = []
-
-        total_files = len(uploaded_files)
+        total_files = len(all_uploaded_files)
         
         # --- ループ処理開始 ---
-        for i, file in enumerate(uploaded_files):
+        for i, file in enumerate(all_uploaded_files):
             status_text.text(f"解析中 ({i+1}/{total_files}): {file.name} ...")
             
-            # --- 1. Excelの全シート対応 ---
-            files_to_process = [] # (content, sheet_name/filename, type) のリスト
+            files_to_process = []
             
             try:
                 if file.name.endswith(('.xlsx', '.xls')):
-                    # Excelブックとして読み込み
                     excel_file = pd.ExcelFile(file)
-                    # 全シートをループ
                     for sheet_name in excel_file.sheet_names:
                         df = pd.read_excel(excel_file, sheet_name=sheet_name)
-                        # データが空のシートはスキップ
                         if not df.empty:
                             csv_text = df.to_csv(index=False)
                             files_to_process.append((csv_text, f"{file.name} [{sheet_name}]", "text"))
@@ -202,9 +194,8 @@ if uploaded_files and api_key:
                     content = file.read()
                     files_to_process.append((content, file.name, "image"))
 
-                # --- 2. 抽出された各データ（シート等）をAI処理 ---
+                # AI処理呼び出し
                 for content, fname, ftype in files_to_process:
-                    # AI処理呼び出し
                     result_csv_text = process_single_file(content, fname, ftype)
                     
                     if result_csv_text.startswith("ERROR"):
@@ -212,65 +203,70 @@ if uploaded_files and api_key:
                     else:
                         rows = [r for r in result_csv_text.split('\n') if r.strip()]
                         current_batch_rows.extend(rows)
-                    
-                    # ★待機時間(time.sleep)を削除しました（有料版対応）
 
             except Exception as e:
                 error_logs.append(f"ERROR: {file.name} の読み込み失敗: {e}")
 
             progress_bar.progress((i + 1) / total_files)
 
-        # --- 3. 結果をセッションに追記 ---
+        # --- 結果をセッションに追記 ---
         if current_batch_rows:
             st.session_state.accumulated_rows.extend(current_batch_rows)
             st.success(f"今回 {len(current_batch_rows)} 行のデータを抽出しました。")
         
         status_text.text("データの統合処理（名寄せ）を行っています...")
 
-        # --- 4. 統合・出力処理（セッション内の全データを使用） ---
+        # --- 統合処理と結果保存 ---
         if st.session_state.accumulated_rows:
-            
-            # ここで名寄せ（統合）を実行
             merged_rows = merge_rows(st.session_state.accumulated_rows)
 
-            # 1. ICS固定ヘッダー
+            # CSVデータ作成
             final_csv_content = "給与,12,月分,FMT,1,DBVER\n"
             final_csv_content += "テンプレ,タイプ,SL=4\n"
-            
-            # 2. 項目名ヘッダー
             ics_header_row = "個人コード,区分コード,氏名（姓）,氏名（名）,氏名フリガナ（姓）,氏名フリガナ（名）,性別,入社年月日,退職年月日,郵便番号,住所1,住所2,1月支給,2月支給,3月支給,4月支給,5月支給,6月支給,7月支給,8月支給,9月支給,10月支給,11月支給,12月支給,1月社会保険料,2月社会保険料,3月社会保険料,4月社会保険料,5月社会保険料,6月社会保険料,7月社会保険料,8月社会保険料,9月社会保険料,10月社会保険料,11月社会保険料,12月社会保険料,1月所得税,2月所得税,3月所得税,4月所得税,5月所得税,6月所得税,7月所得税,8月所得税,9月所得税,10月所得税,11月所得税,12月所得税,1月賞与,2月賞与,3月賞与,4月賞与,5月賞与,6月賞与,7月賞与,8月賞与,9月賞与,10月賞与,11月賞与,12月賞与"
             final_csv_content += ics_header_row + "\n"
-            
-            # 3. 結合
             final_csv_content += "\n".join(merged_rows)
 
-            # ★完了通知の追加
+            # ★重要: セッションに保存して消えないようにする
+            try:
+                st.session_state.final_csv_data = final_csv_content.encode("cp932", errors="ignore")
+            except:
+                # CP932変換エラー時はUTF-8で逃げる（文字化けリスクあるがエラー落ち回避）
+                st.session_state.final_csv_data = final_csv_content.encode("utf-8")
+
+            # 完了通知
             st.toast("すべての解析が完了しました！", icon="🎉")
             st.balloons()
-
-            st.success(f"現在のデータ総数（統合後）: {len(merged_rows)} 人分")
             
-            # プレビュー
-            st.text_area("CSVプレビュー (現在の全データ)", final_csv_content, height=300)
-
-            # ダウンロード
-            try:
-                csv_bytes = final_csv_content.encode("cp932", errors="ignore")
-                st.download_button(
-                    label="統合データをダウンロード (CSV)",
-                    data=csv_bytes,
-                    file_name="ics_import_merged.csv",
-                    mime="text/csv"
-                )
-            except Exception as e:
-                st.error(f"文字コード変換エラー: {e}")
+            # 音で通知（ブラウザの仕様によっては自動再生されない場合があります）
+            # フリー素材の通知音URLなどを設定
+            st.markdown("""
+                <audio autoplay>
+                <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
+                </audio>
+                """, unsafe_allow_html=True)
         else:
-            st.warning("データがありません。ファイルをアップロードして解析してください。")
+            st.warning("データがありません。")
 
         if error_logs:
             st.error("エラーが発生しました:")
             for err in error_logs:
                 st.text(err)
+
+# ==========================================
+# ダウンロードエリア（処理後も常に表示）
+# ==========================================
+# セッションにデータがあれば、いつでもダウンロードボタンを表示する
+if st.session_state.final_csv_data:
+    st.divider()
+    st.success("▼ データの準備ができています（時間が経っても消えません）")
+    
+    st.download_button(
+        label="統合データをダウンロード (CSV)",
+        data=st.session_state.final_csv_data,
+        file_name="ics_import_merged.csv",
+        mime="text/csv"
+    )
 
 elif not api_key:
     st.info("👈 左のサイドバーにGoogle APIキーを入力してください。")
