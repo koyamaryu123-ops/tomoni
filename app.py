@@ -12,9 +12,7 @@ st.set_page_config(page_title="ICS年末調整データ作成ツール", layout=
 
 st.title("📄 ICS年末調整データ作成 AIツール (PDF対応・一括処理版)")
 st.markdown("""
-複数の Excel、CSV、**給与明細の画像・PDF** をまとめてアップロードできます。
-AIが全てのデータを読み取り、**1つのICS用CSVファイル** に統合して出力します。
-**Excelの全シート読み取り、データの自動統合（名寄せ）、追加読み込みに対応しています。**
+以下の3つの項目に分けてファイルをアップロードできます。AIが全てのデータを読み取り、**1つのICS用CSVファイル** に統合・上書きして出力します。
 """)
 
 # ==========================================
@@ -22,7 +20,6 @@ AIが全てのデータを読み取り、**1つのICS用CSVファイル** に統
 # ==========================================
 if 'accumulated_rows' not in st.session_state:
     st.session_state.accumulated_rows = []
-# 処理完了後のCSVデータを保持するための変数
 if 'final_csv_data' not in st.session_state:
     st.session_state.final_csv_data = None
 
@@ -38,27 +35,39 @@ if st.sidebar.button("データをリセット"):
     st.rerun()
 
 # ==========================================
-# エリア1: 通常の給与データアップロード
+# アップロードエリア (3段階)
 # ==========================================
-st.subheader("① 給与明細・台帳データのアップロード")
-uploaded_files_main = st.file_uploader(
-    "いつもの給与データはこちら", 
-    type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
-    accept_multiple_files=True,
-    key="uploader_main"
-)
+col1, col2, col3 = st.columns(3)
 
-# ==========================================
-# エリア2: 給与申告書（追加データ）アップロード
-# ==========================================
-st.subheader("② 給与申告書（追加修正用）のアップロード")
-st.info("※ここでアップロードしたデータは、上のデータに追加・統合されます。")
-uploaded_files_sub = st.file_uploader(
-    "給与申告書など、追加したいファイルはこちら", 
-    type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
-    accept_multiple_files=True,
-    key="uploader_sub"
-)
+with col1:
+    st.subheader("① 通常データ")
+    st.caption("Excelのまとめファイルや、1ファイル完結型のデータ")
+    uploaded_files_normal = st.file_uploader(
+        "ドラッグ＆ドロップ", 
+        type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
+        accept_multiple_files=True,
+        key="uploader_normal"
+    )
+
+with col2:
+    st.subheader("② 分割データ")
+    st.caption("**1人のデータが複数ファイルに分かれている場合** (例: 1月〜12月の明細がバラバラ)")
+    uploaded_files_split = st.file_uploader(
+        "ドラッグ＆ドロップ", 
+        type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
+        accept_multiple_files=True,
+        key="uploader_split"
+    )
+
+with col3:
+    st.subheader("③ 修正・上書き用")
+    st.caption("①②のデータに対し、**後から情報を追加・修正したい場合**のファイル")
+    uploaded_files_overwrite = st.file_uploader(
+        "ドラッグ＆ドロップ", 
+        type=["xlsx", "xls", "csv", "png", "jpg", "jpeg", "pdf"], 
+        accept_multiple_files=True,
+        key="uploader_overwrite"
+    )
 
 def process_single_file(content, filename, file_type="text"):
     """1つのファイルをAIに解析させ、データ行(CSV)だけを取り出す"""
@@ -132,10 +141,10 @@ def merge_rows(all_rows):
 
     group_keys = ['個人コード', '氏名（姓）', '氏名（名）']
     
-    # 統合実行: 同じ人のデータがあれば、後から来たデータの空白でない部分で埋めるイメージ
-    # groupby().first() は「最初の有効な値」を取るため、順序によっては上書きされない場合があるが、
-    # 基本的には情報が集約される
-    df_merged = df.groupby(group_keys, as_index=False).first()
+    # ★変更点: 上書きに対応するため、first() ではなく last() を使用します。
+    # これにより、後から読み込んだファイル（③上書き用）のデータが優先されます。
+    # groupby().last() は、グループ内の「最後の有効な値（NaN以外）」を採用します。
+    df_merged = df.groupby(group_keys, as_index=False).last()
     df_merged = df_merged.fillna("")
 
     merged_rows = []
@@ -148,26 +157,29 @@ def merge_rows(all_rows):
 # ==========================================
 # 実行ボタン
 # ==========================================
-# アップロードされた全ファイルをまとめる
-all_uploaded_files = []
-if uploaded_files_main:
-    all_uploaded_files.extend(uploaded_files_main)
-if uploaded_files_sub:
-    all_uploaded_files.extend(uploaded_files_sub)
+# ファイルを処理する順番を定義（①通常 -> ②分割 -> ③上書き の順にリスト化）
+# これにより、③がリストの最後に来るため、merge_rowsのlast()で優先的に採用される
+processing_list = []
+if uploaded_files_normal:
+    processing_list.extend(uploaded_files_normal)
+if uploaded_files_split:
+    processing_list.extend(uploaded_files_split)
+if uploaded_files_overwrite:
+    processing_list.extend(uploaded_files_overwrite)
 
-if all_uploaded_files and api_key:
+if processing_list and api_key:
     
-    if st.button(f"全 {len(all_uploaded_files)} 件のファイルを一括解析・統合", type="primary"):
+    if st.button(f"全 {len(processing_list)} 件のファイルを一括解析・統合", type="primary"):
         
         progress_bar = st.progress(0)
         status_text = st.empty()
         error_logs = []
         
         current_batch_rows = []
-        total_files = len(all_uploaded_files)
+        total_files = len(processing_list)
         
         # --- ループ処理開始 ---
-        for i, file in enumerate(all_uploaded_files):
+        for i, file in enumerate(processing_list):
             status_text.text(f"解析中 ({i+1}/{total_files}): {file.name} ...")
             
             files_to_process = []
@@ -227,24 +239,39 @@ if all_uploaded_files and api_key:
             final_csv_content += ics_header_row + "\n"
             final_csv_content += "\n".join(merged_rows)
 
-            # ★重要: セッションに保存して消えないようにする
+            # セッションに保存
             try:
                 st.session_state.final_csv_data = final_csv_content.encode("cp932", errors="ignore")
             except:
-                # CP932変換エラー時はUTF-8で逃げる（文字化けリスクあるがエラー落ち回避）
                 st.session_state.final_csv_data = final_csv_content.encode("utf-8")
 
-            # 完了通知
-            st.toast("すべての解析が完了しました！", icon="🎉")
-            st.balloons()
+            # ★完了通知（JavaScriptによるデスクトップ通知）
+            # ブラウザの設定で通知許可が必要です
+            notification_js = """
+            <script>
+                function notify() {
+                    if (!("Notification" in window)) {
+                        console.log("This browser does not support desktop notification");
+                    } else if (Notification.permission === "granted") {
+                        new Notification("ICSデータ作成完了", {
+                            body: "全ての処理が完了しました。ダウンロード可能です。",
+                        });
+                    } else if (Notification.permission !== "denied") {
+                        Notification.requestPermission().then(function (permission) {
+                            if (permission === "granted") {
+                                new Notification("ICSデータ作成完了", {
+                                    body: "全ての処理が完了しました。ダウンロード可能です。",
+                                });
+                            }
+                        });
+                    }
+                }
+                notify();
+            </script>
+            """
+            st.components.v1.html(notification_js, height=0)
+            st.success("🎉 全ての解析が完了しました！(PCに通知を送信しました)")
             
-            # 音で通知（ブラウザの仕様によっては自動再生されない場合があります）
-            # フリー素材の通知音URLなどを設定
-            st.markdown("""
-                <audio autoplay>
-                <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
-                </audio>
-                """, unsafe_allow_html=True)
         else:
             st.warning("データがありません。")
 
@@ -256,10 +283,9 @@ if all_uploaded_files and api_key:
 # ==========================================
 # ダウンロードエリア（処理後も常に表示）
 # ==========================================
-# セッションにデータがあれば、いつでもダウンロードボタンを表示する
 if st.session_state.final_csv_data:
     st.divider()
-    st.success("▼ データの準備ができています（時間が経っても消えません）")
+    st.info("▼ 以下のボタンからデータをダウンロードしてください（処理後も保持されます）")
     
     st.download_button(
         label="統合データをダウンロード (CSV)",
