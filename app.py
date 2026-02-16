@@ -36,6 +36,15 @@ if st.sidebar.button("データをリセット"):
     st.session_state.final_csv_data = None
     st.rerun()
 
+# ★追加: ファイル一括削除ボタン
+if st.sidebar.button("ファイルを一括削除"):
+    # アップローダーのキーをセッションから削除することで強制的にクリアする
+    keys_to_clear = ["uploader_normal", "uploader_split", "uploader_overwrite"]
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.rerun()
+
 # ==========================================
 # アップロードエリア (3段階)
 # ==========================================
@@ -251,7 +260,6 @@ if processing_list and api_key:
                 st.session_state.final_csv_data = final_csv_content.encode("utf-8")
 
             # ★完了通知（JavaScriptによるデスクトップ通知）
-            # Streamlit Componentsを使用してスクリプトを実行
             notification_js = """
             <script>
                 function notify() {
