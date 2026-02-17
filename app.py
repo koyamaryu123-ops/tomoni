@@ -30,7 +30,7 @@ if 'uploader_id' not in st.session_state:
     st.session_state.uploader_id = 0
 
 # サイドバーでAPIキー入力
-api_key = st.sidebar.text_input("AIzaSyDCRsVPD7krj2iYrwrogh37RCsplx8S5lc", type="password")
+api_key = st.sidebar.text_input("AIzaSyBxBXfFxan1NmOb9ddSGTOIhbgo5gg4KLM", type="password")
 if api_key:
     genai.configure(api_key=api_key)
 
